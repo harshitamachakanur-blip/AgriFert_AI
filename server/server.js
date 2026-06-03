@@ -172,26 +172,18 @@ const diseaseDB = {
 function detectDisease(cropName, params) {
   const { nitrogen, phosphorus, potassium, temperature, humidity, ph, rainfall } = params;
   const cropDiseases = diseaseDB[cropName] || diseaseDB['Rice'];
-  
   let selectedDisease = cropDiseases[0];
   let confidence = 70;
-
-  // Heuristic confidence based on parameters
   if (humidity > 80) confidence += 10;
   if (temperature > 30 && temperature < 35) confidence += 5;
-  if (nitrogen > 80) confidence += 5; // excess N increases disease risk
+  if (nitrogen > 80) confidence += 5;
   if (ph < 5.5 || ph > 7.5) confidence += 5;
   if (cropDiseases.length > 1 && rainfall > 200) {
     selectedDisease = cropDiseases[1];
     confidence = 72 + Math.floor(Math.random() * 10);
   }
-
   confidence = Math.min(95, confidence);
-
-  return {
-    disease: selectedDisease,
-    confidence
-  };
+  return { disease: selectedDisease, confidence };
 }
 
 function getAIRecommendation(input) {
@@ -201,24 +193,18 @@ function getAIRecommendation(input) {
   for (const [name, data] of Object.entries(fertilizerDB)) {
     let score = 50;
     const nLow = nitrogen < 50, pLow = phosphorus < 30, kLow = potassium < 40;
-
     if (nLow && data.n > 20) score += 20;
     if (pLow && data.p > 15) score += 20;
     if (kLow && data.k > 30) score += 20;
     if (!nLow && data.n > 30) score -= 10;
     if (!pLow && data.p > 30) score -= 10;
     if (!kLow && data.k > 40) score -= 10;
-
-    const cropMatch = data.bestFor.some(c =>
-      c.toLowerCase() === cropType.toLowerCase() || c === 'All Crops'
-    );
+    const cropMatch = data.bestFor.some(c => c.toLowerCase() === cropType.toLowerCase() || c === 'All Crops');
     if (cropMatch) score += 15;
-
     if (phLevel < 6.0 && name === 'Single Super Phosphate') score += 8;
     if (phLevel > 7.5 && name === 'Urea') score += 5;
     if (soilType === 'Sandy' && name === 'Compost') score += 10;
     if (soilMoisture < 30 && name === 'Compost') score += 8;
-
     scores[name] = Math.min(98, Math.max(55, score));
   }
 
@@ -254,11 +240,9 @@ function getAIRecommendation(input) {
   };
 }
 
-// Seasonal advice
 function getSeasonalAdvice(cropType, temperature, humidity, rainfall) {
   const season = temperature > 30 ? 'Summer/Kharif' : temperature < 18 ? 'Winter/Rabi' : 'Spring/Zaid';
   const irrigationFreq = humidity < 50 ? 'every 5–7 days' : humidity < 70 ? 'every 10–12 days' : 'every 14–18 days';
-
   return {
     season,
     irrigationSchedule: `Irrigate ${irrigationFreq}. Monitor soil moisture and avoid waterlogging.`,
@@ -288,12 +272,10 @@ const protect = async (req, res, next) => {
     ? req.headers.authorization.split(' ')[1] : null;
   if (!token) return res.status(401).json({ success: false, message: 'Not authorized' });
 
-  // Accept demo tokens issued by the client-side auth fallback
   if (token.startsWith('demo_token_')) {
     try {
       const payload = Buffer.from(token.replace('demo_token_', ''), 'base64').toString('utf8');
       const email = payload.split(':')[0];
-      // Attach a synthetic user object so routes that read req.user work
       req.user = { _id: 'demo_' + email, name: 'Demo User', email, role: 'user', isDemoUser: true };
       return next();
     } catch {
@@ -317,9 +299,7 @@ const protect = async (req, res, next) => {
 
 async function callClaudeAI(systemPrompt, userMessage, maxTokens = 800) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey === 'your_anthropic_api_key_here') {
-    return null; // Gracefully fall back to rule-based system
-  }
+  if (!apiKey || apiKey === 'your_anthropic_api_key_here') return null;
   try {
     const response = await axios.post('https://api.anthropic.com/v1/messages', {
       model: 'claude-sonnet-4-20250514',
@@ -327,11 +307,7 @@ async function callClaudeAI(systemPrompt, userMessage, maxTokens = 800) {
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }]
     }, {
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       timeout: 15000
     });
     return response.data.content[0]?.text || null;
@@ -400,43 +376,29 @@ app.post('/api/recommendations/generate', protect, async (req, res) => {
     const aiResult = getAIRecommendation(input);
     const seasonal = getSeasonalAdvice(input.cropType, input.temperature, input.humidity, input.rainfall);
 
-    // Try Claude AI for enhanced explanation
     let enhancedExplanation = null;
     const aiPrompt = `You are an expert agronomist. Given these soil & crop parameters:
 Crop: ${input.cropType}, N:${input.nitrogen}, P:${input.phosphorus}, K:${input.potassium},
 Temperature:${input.temperature}°C, Humidity:${input.humidity}%, pH:${input.phLevel},
 Recommended Fertilizer: ${aiResult.fertilizer.name}
-
 Provide a 3-sentence practical farming advice in simple English for an Indian farmer.`;
-    enhancedExplanation = await callClaudeAI(
-      'You are an expert Indian agronomist. Give short, practical, and specific advice.',
-      aiPrompt, 300
-    );
+    enhancedExplanation = await callClaudeAI('You are an expert Indian agronomist. Give short, practical, and specific advice.', aiPrompt, 300);
 
     const saved = await Recommendation.create({
       user: req.user._id, ...input,
-      fertilizerName: aiResult.fertilizer.name,
-      fertilizerType: aiResult.fertilizer.type,
-      confidence: aiResult.confidence,
-      explanation: aiResult.explanation,
-      applicationRate: aiResult.applicationRate,
-      tips: aiResult.tips,
+      fertilizerName: aiResult.fertilizer.name, fertilizerType: aiResult.fertilizer.type,
+      confidence: aiResult.confidence, explanation: aiResult.explanation,
+      applicationRate: aiResult.applicationRate, tips: aiResult.tips,
       aiAdvisorOutput: enhancedExplanation || ''
     });
 
     res.status(200).json({
       success: true,
       data: {
-        _id: saved._id,
-        fertilizer: aiResult.fertilizer,
-        confidence: aiResult.confidence,
-        explanation: aiResult.explanation,
-        enhancedExplanation,
-        applicationRate: aiResult.applicationRate,
-        tips: aiResult.tips,
-        alternatives: aiResult.alternatives,
-        seasonal,
-        inputData: input
+        _id: saved._id, fertilizer: aiResult.fertilizer, confidence: aiResult.confidence,
+        explanation: aiResult.explanation, enhancedExplanation,
+        applicationRate: aiResult.applicationRate, tips: aiResult.tips,
+        alternatives: aiResult.alternatives, seasonal, inputData: input
       }
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -477,32 +439,23 @@ app.post('/api/disease/detect', protect, upload.single('image'), async (req, res
     const params = {
       nitrogen: Number(nitrogen) || 50, phosphorus: Number(phosphorus) || 25,
       potassium: Number(potassium) || 40, temperature: Number(temperature) || 28,
-      humidity: Number(humidity) || 70, ph: Number(ph) || 6.5,
-      rainfall: Number(rainfall) || 150
+      humidity: Number(humidity) || 70, ph: Number(ph) || 6.5, rainfall: Number(rainfall) || 150
     };
 
-    // Rule-based detection
     const { disease, confidence } = detectDisease(cropName, params);
-
-    // Try Claude AI for detailed analysis
     let aiAnalysis = null;
     const imageBase64 = req.file ? req.file.buffer.toString('base64') : null;
-    
+
     if (imageBase64) {
-      // Use Claude Vision for image analysis
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (apiKey && apiKey !== 'your_anthropic_api_key_here') {
         try {
           const visionResponse = await axios.post('https://api.anthropic.com/v1/messages', {
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 600,
-            messages: [{
-              role: 'user',
-              content: [
-                { type: 'image', source: { type: 'base64', media_type: req.file.mimetype, data: imageBase64 } },
-                { type: 'text', text: `This is a ${cropName} plant leaf. Identify if there is any disease visible. Provide: disease name, severity (Low/Medium/High), main symptom in 1 sentence, and 2 treatment suggestions. Be concise.` }
-              ]
-            }]
+            model: 'claude-sonnet-4-20250514', max_tokens: 600,
+            messages: [{ role: 'user', content: [
+              { type: 'image', source: { type: 'base64', media_type: req.file.mimetype, data: imageBase64 } },
+              { type: 'text', text: `This is a ${cropName} plant leaf. Identify if there is any disease visible. Provide: disease name, severity (Low/Medium/High), main symptom in 1 sentence, and 2 treatment suggestions. Be concise.` }
+            ]}]
           }, {
             headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
             timeout: 20000
@@ -511,7 +464,6 @@ app.post('/api/disease/detect', protect, upload.single('image'), async (req, res
         } catch (e) { console.error('Vision API error:', e.message); }
       }
     } else {
-      // Text-based AI analysis
       aiAnalysis = await callClaudeAI(
         'You are a plant pathologist. Give concise disease analysis for farmers.',
         `${cropName} crop: N=${params.nitrogen}, P=${params.phosphorus}, K=${params.potassium}, Temp=${params.temperature}°C, Humidity=${params.humidity}%, pH=${params.ph}. What disease risk exists? Name it, give severity, causes (2 points), and treatment (2 points). Keep it under 150 words.`,
@@ -521,31 +473,19 @@ app.post('/api/disease/detect', protect, upload.single('image'), async (req, res
 
     const saved = await DiseaseDetection.create({
       user: req.user._id, cropName, ...params,
-      diseaseName: disease.name,
-      confidence,
-      severity: disease.severity,
+      diseaseName: disease.name, confidence, severity: disease.severity,
       description: `${disease.name} is a ${disease.severity.toLowerCase()} severity disease commonly affecting ${cropName}.`,
-      causes: disease.causes,
-      treatment: disease.treatment,
-      prevention: disease.prevention,
-      recommendedFertilizers: disease.fertilizers,
-      hasImage: !!req.file
+      causes: disease.causes, treatment: disease.treatment, prevention: disease.prevention,
+      recommendedFertilizers: disease.fertilizers, hasImage: !!req.file
     });
 
     res.json({
       success: true,
       data: {
-        _id: saved._id,
-        diseaseName: disease.name,
-        confidence,
-        severity: disease.severity,
-        description: saved.description,
-        causes: disease.causes,
-        treatment: disease.treatment,
-        prevention: disease.prevention,
-        recommendedFertilizers: disease.fertilizers,
-        aiAnalysis,
-        searchQuery: `${disease.name} ${cropName} plant disease`
+        _id: saved._id, diseaseName: disease.name, confidence, severity: disease.severity,
+        description: saved.description, causes: disease.causes, treatment: disease.treatment,
+        prevention: disease.prevention, recommendedFertilizers: disease.fertilizers,
+        aiAnalysis, searchQuery: `${disease.name} ${cropName} plant disease`
       }
     });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -567,12 +507,10 @@ app.post('/api/chat/message', protect, async (req, res) => {
     const { message, sessionId, language = 'en' } = req.body;
     if (!message || !sessionId) return res.status(400).json({ success: false, message: 'Message and sessionId required' });
 
-    // Skip DB for demo users (no real MongoDB _id)
     let messages = [];
     if (!req.user.isDemoUser) {
       await ChatMessage.create({ user: req.user._id, sessionId, role: 'user', content: message, language });
-      const history = await ChatMessage.find({ user: req.user._id, sessionId })
-        .sort({ createdAt: -1 }).limit(10).lean();
+      const history = await ChatMessage.find({ user: req.user._id, sessionId }).sort({ createdAt: -1 }).limit(10).lean();
       messages = history.reverse().map(m => ({ role: m.role, content: m.content }));
     } else {
       messages = [{ role: 'user', content: message }];
@@ -582,29 +520,24 @@ app.post('/api/chat/message', protect, async (req, res) => {
 You specialize in: fertilizer recommendations, crop disease diagnosis, soil health, irrigation, 
 weather-based farming advice, and seasonal crop planning.
 Answer in ${language === 'en' ? 'English' : language} language. 
-Be practical, specific, and use simple language. Keep answers under 150 words.
-If asked about specific crops/diseases, give actionable advice.`;
+Be practical, specific, and use simple language. Keep answers under 150 words.`;
 
-    let reply = null;
-    reply = await callClaudeAI(systemPrompt, message, 400);
+    let reply = await callClaudeAI(systemPrompt, message, 400);
 
-    // Rule-based fallback
     if (!reply) {
       const q = message.toLowerCase();
-      if (q.includes('fertilizer') || q.includes('urea') || q.includes('npk')) {
+      if (q.includes('fertilizer') || q.includes('urea') || q.includes('npk'))
         reply = 'For balanced fertilization, test your soil first. Most crops need NPK in ratio 4:2:1. Urea is best for nitrogen, DAP for phosphorus, and MOP for potassium. Apply in split doses for better absorption.';
-      } else if (q.includes('disease') || q.includes('pest') || q.includes('blight')) {
+      else if (q.includes('disease') || q.includes('pest') || q.includes('blight'))
         reply = 'Common diseases: Rice blast, Wheat rust, Tomato blight. Prevention: Use certified seeds, maintain proper spacing, avoid excess nitrogen. Spray copper fungicide preventively. Remove infected plant parts immediately.';
-      } else if (q.includes('irrigation') || q.includes('water')) {
+      else if (q.includes('irrigation') || q.includes('water'))
         reply = 'Irrigation schedule depends on crop stage and weather. Most crops need 25-30mm water per week. Monitor soil moisture at 6-inch depth. Drip irrigation saves 40% water. Avoid irrigating at peak heat hours.';
-      } else if (q.includes('soil') || q.includes('ph') || q.includes('nutrient')) {
+      else if (q.includes('soil') || q.includes('ph') || q.includes('nutrient'))
         reply = 'Ideal soil pH is 6.0-7.0 for most crops. Below 6: add lime. Above 7: add gypsum or sulfur. Organic matter improves soil structure. Test soil every season for accurate nutrient management.';
-      } else {
+      else
         reply = 'I can help with fertilizer recommendations, disease identification, soil health, irrigation schedules, and seasonal farming tips. Please ask your specific farming question!';
-      }
     }
 
-    // Save assistant response (skip for demo users)
     if (!req.user.isDemoUser) {
       await ChatMessage.create({ user: req.user._id, sessionId, role: 'assistant', content: reply, language });
     }
@@ -625,8 +558,7 @@ app.get('/api/chat/sessions', protect, async (req, res) => {
     const sessions = await ChatMessage.aggregate([
       { $match: { user: req.user._id } },
       { $group: { _id: '$sessionId', lastMessage: { $last: '$content' }, updatedAt: { $max: '$createdAt' }, count: { $sum: 1 } } },
-      { $sort: { updatedAt: -1 } },
-      { $limit: 20 }
+      { $sort: { updatedAt: -1 } }, { $limit: 20 }
     ]);
     res.json({ success: true, data: sessions });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
@@ -648,32 +580,21 @@ app.get('/api/analytics/dashboard', protect, async (req, res) => {
       DiseaseDetection.countDocuments({ user: userId }),
       Recommendation.find({ user: userId }).select('fertilizerName cropType createdAt confidence').lean(),
       DiseaseDetection.find({ user: userId }).select('diseaseName cropName severity createdAt').lean(),
-      Recommendation.find({ user: userId }).sort({ createdAt: -1 }).limit(5)
-        .select('fertilizerName cropType confidence createdAt').lean()
+      Recommendation.find({ user: userId }).sort({ createdAt: -1 }).limit(5).select('fertilizerName cropType confidence createdAt').lean()
     ]);
 
-    // Fertilizer frequency
     const fertilizerCount = {};
     allRecs.forEach(r => { fertilizerCount[r.fertilizerName] = (fertilizerCount[r.fertilizerName] || 0) + 1; });
-    const topFertilizers = Object.entries(fertilizerCount)
-      .sort(([,a],[,b]) => b - a).slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
+    const topFertilizers = Object.entries(fertilizerCount).sort(([,a],[,b]) => b - a).slice(0, 5).map(([name, count]) => ({ name, count }));
 
-    // Crop-wise stats
     const cropCount = {};
     allRecs.forEach(r => { cropCount[r.cropType] = (cropCount[r.cropType] || 0) + 1; });
-    const cropStats = Object.entries(cropCount)
-      .sort(([,a],[,b]) => b - a)
-      .map(([crop, count]) => ({ crop, count }));
+    const cropStats = Object.entries(cropCount).sort(([,a],[,b]) => b - a).map(([crop, count]) => ({ crop, count }));
 
-    // Disease frequency
     const diseaseCount = {};
     allDiseases.forEach(d => { diseaseCount[d.diseaseName] = (diseaseCount[d.diseaseName] || 0) + 1; });
-    const topDiseases = Object.entries(diseaseCount)
-      .sort(([,a],[,b]) => b - a).slice(0, 5)
-      .map(([name, count]) => ({ name, count }));
+    const topDiseases = Object.entries(diseaseCount).sort(([,a],[,b]) => b - a).slice(0, 5).map(([name, count]) => ({ name, count }));
 
-    // Monthly trend (last 6 months)
     const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
     const monthlyData = {};
     allRecs.filter(r => new Date(r.createdAt) > sixMonthsAgo).forEach(r => {
@@ -681,21 +602,11 @@ app.get('/api/analytics/dashboard', protect, async (req, res) => {
       monthlyData[month] = (monthlyData[month] || 0) + 1;
     });
 
-    // Average confidence
-    const avgConfidence = allRecs.length
-      ? Math.round(allRecs.reduce((s, r) => s + r.confidence, 0) / allRecs.length)
-      : 0;
+    const avgConfidence = allRecs.length ? Math.round(allRecs.reduce((s, r) => s + r.confidence, 0) / allRecs.length) : 0;
 
     const dashboardData = {
-      summary: {
-        totalRecommendations: totalRecs,
-        totalDiseaseDetections: totalDiseases,
-        avgConfidence,
-        uniqueCrops: Object.keys(cropCount).length
-      },
-      topFertilizers,
-      cropStats,
-      topDiseases,
+      summary: { totalRecommendations: totalRecs, totalDiseaseDetections: totalDiseases, avgConfidence, uniqueCrops: Object.keys(cropCount).length },
+      topFertilizers, cropStats, topDiseases,
       monthlyTrend: Object.entries(monthlyData).map(([month, count]) => ({ month, count })),
       recentActivity
     };
@@ -706,7 +617,7 @@ app.get('/api/analytics/dashboard', protect, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ROUTES: VOICE ASSISTANT (NLP Processing)
+// ROUTES: VOICE ASSISTANT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.post('/api/voice/process', protect, async (req, res) => {
@@ -715,25 +626,21 @@ app.post('/api/voice/process', protect, async (req, res) => {
     if (!transcript) return res.status(400).json({ success: false, message: 'Transcript required' });
 
     const systemPrompt = `You are AgriFert Voice AI, an agricultural assistant for Indian farmers. 
-The farmer spoke in ${language}. Understand their query and respond helpfully.
-Focus areas: fertilizers, crop diseases, soil, irrigation, weather farming advice.
-Respond in the SAME language as the input (${language}).
+The farmer spoke in ${language}. Respond in the SAME language (${language}).
 Keep response under 100 words, suitable for text-to-speech. Be warm and encouraging.`;
 
     let response = await callClaudeAI(systemPrompt, transcript, 300);
 
     if (!response) {
-      // Rule-based voice response
       const t = transcript.toLowerCase();
-      if (t.includes('fertilizer') || t.includes('khad') || t.includes('ಗೊಬ್ಬರ')) {
+      if (t.includes('fertilizer') || t.includes('khad') || t.includes('ಗೊಬ್ಬರ'))
         response = 'For best results, test your soil first. Use NPK fertilizer balanced for your crop. Apply urea for nitrogen, DAP for phosphorus needs.';
-      } else if (t.includes('disease') || t.includes('rog') || t.includes('ರೋಗ')) {
+      else if (t.includes('disease') || t.includes('rog') || t.includes('ರೋಗ'))
         response = 'To control crop disease, remove infected plants immediately. Spray copper fungicide. Use certified disease-resistant seeds next season.';
-      } else if (t.includes('water') || t.includes('irrigation') || t.includes('ನೀರು')) {
+      else if (t.includes('water') || t.includes('irrigation') || t.includes('ನೀರು'))
         response = 'Irrigate your crop early morning or evening. Check soil moisture at 6 inch depth. Most crops need water every 7 to 10 days.';
-      } else {
+      else
         response = 'I am your AgriFert farming assistant. Ask me about fertilizers, diseases, irrigation, or crop management. How can I help you today?';
-      }
     }
 
     res.json({ success: true, data: { response, language } });
@@ -750,7 +657,7 @@ app.get('/api/health', (req, res) => {
     message: 'AgriFert Enhanced API v2.0 ✅',
     timestamp: new Date(),
     features: ['recommendations','disease-detection','chatbot','voice-assistant','analytics'],
-    ai: process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here' ? 'Claude AI Active' : 'Rule-based (Add ANTHROPIC_API_KEY for Claude AI)'
+    ai: process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your_anthropic_api_key_here' ? 'Claude AI Active' : 'Rule-based'
   });
 });
 
@@ -761,7 +668,7 @@ app.use((err, req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// START SERVER
+// START SERVER — ✅ FIXED FOR RENDER DEPLOYMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/agrifert_v2';
@@ -769,8 +676,8 @@ mongoose.connect(MONGO_URI)
   .then(() => {
     console.log('✅ MongoDB Connected');
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`🌱 AgriFert Enhanced Server v2.0 on http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🌱 AgriFert Enhanced Server v2.0 on port ${PORT}`);
       console.log(`🔗 Health: http://localhost:${PORT}/api/health`);
     });
   })
